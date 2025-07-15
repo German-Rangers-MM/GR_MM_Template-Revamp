@@ -1,17 +1,110 @@
 ﻿//------------------------------------------------------------------
 //------------------------------------------------------------------
 //
-//						Player Initialisierung
+//							Player Init
 //
 //------------------------------------------------------------------
 //------------------------------------------------------------------
-waitUntil{!isNull(player)};
-setTerrainGrid 25;
-enableEnvironment [false, true];
-titleText ["Missionsvorbereitung", "BLACK FADED" ];
 
-// briefingName
-[] execVM "scripts\core\briefing.sqf";
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Developer Mode
+//
+// Deactivates all Intros in the beginning for a "faster" Load In
+//
+// Should be deactivated when doing a final Mission extract.
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+_devMode = false;
+
+if (!_devMode) then {
+	titleText ["Preparing Mission...", "BLACK FADED", 1];
+}
+else {
+	player allowDamage false;
+};
+
+// Generating Briefing Section
+[] execVM "scripts\UAMTScripts\briefing.sqf";
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//							Mod Check
+//
+// 			Checks Loaded Mods and logs Non Whitelisted
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "modcheck" == "true") then {
+	_modCheckresult = call compile preprocessFile "scripts\UAMTScripts\modcheck.sqf";
+	
+	waitUntil {sleep 1;_modCheckresult};
+	
+	if (!_modCheckresult) exitWith {};
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Opening Track
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+if (!_devMode) then {
+	if (getMissionConfigValue "iJName" != "") then {
+		
+		[] spawn {
+			//Needed for fadeMusic to work
+			ace_hearing_disableVolumeUpdate = true;
+
+			//set Music to zero for FadeIn
+			0 fadeMusic 0;
+
+			// Debug Play, needed because sometimes Arme has problems starting a Track
+			// that is not defined in the Missions CfGMusic.
+			playMusic (getMissionConfigValue "iJName");
+			sleep 0.1;
+
+			//Playing the OT Track with music
+			playMusic [getMissionConfigValue "iJName",getMissionConfigValue "iJStart"];
+			(getMissionConfigValue "iJFade") fadeMusic 1;
+			
+			sleep (getMissionConfigValue "iJFade" + 1);
+			ace_hearing_disableVolumeUpdate = false;
+		};
+	};
+};
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Mission Started Feature
+//
+// If active, all Players will be teleported onto the "base"-Object 
+// Mostly for JiP and reconnect
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "missionstartedfeat" == "true") then {
+	if (missionNameSpace getVariable ["missionStarted",false]) then {
+		
+		_center = getPos base;
+		_spawnPos = [0,0,0];
+		_spawnPos = _center findEmptyPosition [0.5, 30, "B_Soldier_F"];
+		_timer = time;
+		
+		waitUntil {count _spawnPos == 3 || time - _timer > 20};
+		
+		player allowDamage false;
+		player setPos _spawnPos;
+		sleep 1;
+		player allowDamage true;
+	};
+};
+
+waitUntil{!isNull(player)};
 
 //------------------------------------------------------------------
 //------------------------------------------------------------------
@@ -22,48 +115,735 @@ titleText ["Missionsvorbereitung", "BLACK FADED" ];
 //------------------------------------------------------------------
 
 //DynamicGroups_Function Function needs to be initialized on server and client. Clients can then use action TeamSwitch ("U" by default) to access the Dynamic Groups interface.
-if (getMissionConfigValue "dynamicGroupsFeat" == "true") then {
-	["InitializePlayer", [player]] call BIS_fnc_dynamicGroups;	//Exec on client
+["InitializePlayer", [player]] call BIS_fnc_dynamicGroups;			//Exec on client
+
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//							Loadout
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+_playerLoadout = player getVariable "loadout";
+
+_loadoutArr = [_playerLoadout] call UAMT_fnc_loadoutCreate;
+[player,_loadoutArr] spawn UAMT_fnc_loadoutApply;
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					ACE Self Interact Menus
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+//Variables needed for following access evaluation. Is more performant when defined once as private Variable.
+_playerGrp = group player;
+_playerGroupID = groupID group player;
+_playerVar = vehicleVarName player;
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					Mission Control Center
+//
+// Makes several Options of the Mission Control Center available
+// for all Players of the Group TOC
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+//------------------------------------------------------------------
+//						Zeus Mission Control
+//------------------------------------------------------------------
+
+// Creating a Sub Menu Category GR Base with Logo
+_mission_control = ["Mission Control","Mission Control","images\Logo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions"], _mission_control] call ace_interact_menu_fnc_addActionToZeus;
+
+_start_mission = ["Missionstart","Missionstart","",{ execVM "scripts\UAMTScripts\MissionControlCenter\MCC_chapter_missionstart.sqf"; },{true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions","Mission Control"], _start_mission] call ace_interact_menu_fnc_addActionToZeus;
+
+_mission_succesful = ["End: Mission Accomplished","End: Mission Accomplished","",{ [true] execVM "scripts\UAMTScripts\MissionControlCenter\MCC_chapter_missionend.sqf"; },{true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions","Mission Control"], _mission_succesful] call ace_interact_menu_fnc_addActionToZeus;
+
+_to_be_continued = ["End: TO BE CONTINUED","End: TO BE CONTINUED","",{ [false] execVM "scripts\UAMTScripts\MissionControlCenter\MCC_chapter_missionend.sqf"; },{true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions","Mission Control"], _to_be_continued] call ace_interact_menu_fnc_addActionToZeus;
+
+//------------------------------------------------------------------
+//						Zeus Debug Menu
+//------------------------------------------------------------------
+_uamtDebugMenu = ["Debug Menu","Debug Menu","images\Logo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions"], _uamtDebugMenu] call ace_interact_menu_fnc_addActionToZeus;
+
+_uDMsupplyDrop = ["Reset Supply Drop","Reset Supply Drop","a3\missions_f_oldman\data\img\holdactions\holdaction_box_ca.paa",{supplyDropStatus = 0;publicVariable "supplyDropStatus";}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions", "Debug Menu"], _uDMsupplyDrop] call ace_interact_menu_fnc_addActionToZeus;
+
+_uDMarti = ["Reset Artillery","Reset Artillery","\a3\ui_f\data\igui\cfg\simpletasks\types\destroy_ca.paa",{artiStatus = 0;publicVariable "artiStatus";}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions", "Debug Menu"], _uDMarti] call ace_interact_menu_fnc_addActionToZeus;
+
+_uDMvls = ["Reset VLS","Reset VLS","\a3\ui_f\data\igui\cfg\simpletasks\types\destroy_ca.paa",{vlsStatus = 0;publicVariable "vlsStatus";}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions", "Debug Menu"], _uDMvls] call ace_interact_menu_fnc_addActionToZeus;
+
+_uDMcas = ["Reset CAS","Reset CAS","\a3\ui_f\data\igui\cfg\simpletasks\types\destroy_ca.paa",{casStatus = 0;publicVariable "casStatus";}, {true}] call ace_interact_menu_fnc_createAction;
+[["ACE_ZeusActions", "Debug Menu"], _uDMcas] call ace_interact_menu_fnc_addActionToZeus;
+//------------------------------------------------------------------
+//					Ingame Mission Control
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "mCC" == "true") then {
+	if ((getMissionConfigValue "mccAccess" findIf {_x == _playerVar} > -1) || (getMissionConfigValue "mccAccess" findIf {_x == _playerGroupID} > -1)) then {
+		// Creating the Admin Control Menu Category GR Base with Logo
+		_adminmenu = ["Mission Control Center","Mission Control Center","images\Logo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
+		[(typeOf player), 1, ["ACE_SelfActions"], _adminmenu] call ace_interact_menu_fnc_addActionToClass;
+		
+		if (getMissionConfigValue "mccHeal" == "true") then {
+			_fullheal = ["Full Heal","Full Heal","a3\ui_f\data\igui\cfg\simpletasks\types\heal_ca.paa",{[player, cursorObject] call ace_medical_treatment_fnc_fullHeal},{true}] call ace_interact_menu_fnc_createAction;
+			[(typeOf player), 1, ["ACE_SelfActions","Mission Control Center"], _fullheal] call ace_interact_menu_fnc_addActionToClass;
+		};
+
+		if (getMissionConfigValue "mccStart" == "true") then {
+			[(typeOf player), 1, ["ACE_SelfActions","Mission Control Center"], _start_mission] call ace_interact_menu_fnc_addActionToClass;
+		};
+
+		if (getMissionConfigValue "mccEnd" == "true") then {
+			[(typeOf player), 1, ["ACE_SelfActions","Mission Control Center"], _mission_succesful] call ace_interact_menu_fnc_addActionToClass;
+		};
+
+		if (getMissionConfigValue "mccContinue" == "true") then {
+			[(typeOf player), 1, ["ACE_SelfActions","Mission Control Center"], _to_be_continued] call ace_interact_menu_fnc_addActionToClass;
+		};
+	};
 };
 
+
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //
-//							Loadouts
+//					Base Menu
 //
 //------------------------------------------------------------------
 //------------------------------------------------------------------
-// warten auf die Variablen für Fraktion und Tarnfarbe vom Server
-waitUntil { sleep 1; !isNil "fraktionV" && !isNil "tarnfarbeV" };
 
-//Abfrage ob Datenbank oder frisches Loadout
-if (getMissionConfigValue "loadPlayers" == "true") then {
 
-	// INIDB
-	_clientID = clientOwner;
-	_UID = getPlayerUID player;
-	_name = name player;
-	checkForDatabase = [_clientID, player, _name];
-	publicVariableServer "checkForDatabase";
-	_hasLoadout = false;
+//Condition in which radius around the "base"-Object the Base-Menu is available
+_conBaseMenu = {player distance2D base < 100 || missionstarted == false};
 
-	"loadData" addPublicVariableEventHandler
-	{
-		_gear = (_this select 1);
-		player setUnitLoadout _gear;
-		_hasloadout = true;
+// Creating a Sub Menu Category Base with Logo
+_base_menu = ["Base Menu","Base Menu","images\Logo.paa",{},_conBaseMenu] call ace_interact_menu_fnc_createAction;
+[(typeOf player), 1, ["ACE_SelfActions"], _base_menu] call ace_interact_menu_fnc_addActionToClass;
+
+//Add Armory to ACE Menu GR Base
+if (getMissionConfigValue "allowArmory" == "true") then {
+	_armory = ["Armory","Armory","a3\ui_f\data\igui\cfg\cursors\iconrearmat_ca.paa",{call UAMT_fnc_loadoutArsenal},_conBaseMenu] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","Base Menu"], _armory] call ace_interact_menu_fnc_addActionToClass;
+};
+
+//Add Teleport to ACE Base Menu 
+_teleport_action = ["Teleporter","Teleporter","a3\modules_f_tacops\data\civilianpresenceunit\icon32_ca.paa",{ _teleportDialog = createDialog "teleportDialog";},_conBaseMenu] call ace_interact_menu_fnc_createAction;
+[(typeOf player), 1, ["ACE_SelfActions","Base Menu"], _teleport_action] call ace_interact_menu_fnc_addActionToClass;
+
+//Add Loadout Menu to ACE Base Menu
+if (getMissionConfigValue "allowLoadouts" == "true") then {
+	_loadout_action = ["Loadouts","Loadouts","z\ace\addons\nametags\ui\icon_position_ffv.paa",{ _loadoutDialog = createDialog "loadoutDialog";},_conBaseMenu] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","Base Menu"], _loadout_action] call ace_interact_menu_fnc_addActionToClass;
+};
+
+_reset_loadout = ["Reset Loadout","Reset Loadout","a3\modules_f\data\iconrespawn_ca.paa",{ 	
+	private _loadoutArr = [(player getVariable ["loadout", ""])] call UAMT_fnc_loadoutCreate;
+	[player,_loadoutArr] spawn UAMT_fnc_loadoutApply;
+},_conBaseMenu] call ace_interact_menu_fnc_createAction;
+[(typeOf player), 1, ["ACE_SelfActions","Base Menu"], _reset_loadout] call ace_interact_menu_fnc_addActionToClass;
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Supply Drop Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "supplyDropFeature" == "true") then {
+
+	_supplyDropCon = {
+		missionNameSpace getVariable ["supplyDropStatus",0] < 4 && (((getMissionConfigValue "supplyDropRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "supplyDropRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "supplyDropRoles") findIf {_x == player getVariable "loadout";} > -1))
 	};
 	
-	if (_hasloadout == false) then {
-		call compile preprocessFileLineNumbers "loadouts\loadoutInit.sqf";
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["supplyDropStatus",0]) do {
+			case 1 : {_status = " (Call in Progress)";};
+			case 2 : {_status = " (in Progress)";};
+			case 3 : {_status = " (Preparing new Supply Drop)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Supply Drop (%1 left)%2",((getMissionConfigValue "supplyDropMax") - (missionNameSpace getVariable ["supplyDropCount",0])),_status]];
 	};
-}
-else {
-	call compile preprocessFileLineNumbers "loadouts\loadoutInit.sqf";
+	
+	_supplyDropMenu = ["SupplyDrop","Supply Drop","a3\missions_f_oldman\data\img\holdactions\holdaction_box_ca.paa",{ [] spawn sdpDialog_fnc_sdpCreateDialog }, _supplyDropCon,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _supplyDropMenu] call ace_interact_menu_fnc_addActionToClass;
 };
 
-// Loadouts pro Gruppe zuweisen
-call compile preprocessFileLineNumbers format ["loadouts\%1\gruppenLoadouts.sqf", fraktionV];
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Transport Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+	
+if (getMissionConfigValue "chtFeature" == "true") then {
+
+	// CAS Terminal
+	_condition = { (((getMissionConfigValue "chtRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "chtRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "chtRoles") findIf {_x == player getVariable "loadout";} > -1)) };
+
+	
+	_chtTerminal = ["Heli Transport","Heli Transport","a3\ui_f\data\igui\cfg\simpletasks\types\Heli_ca.paa",{[] call chtDialog_fnc_chtCreateDialog;},_condition] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _chtTerminal] call ace_interact_menu_fnc_addActionToClass;
+	
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Artillery Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "artiFeature" == "true") then {
+
+	_artiCondition = {
+		missionNameSpace getVariable ["artiStatus",4] < 4 && (((getMissionConfigValue "artiRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "artiRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "artiRoles") findIf {_x == player getVariable "loadout";} > -1))
+	};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["artiStatus",4]) do {
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Artillery%1",_status]];
+	};
+	
+	// Creating a Sub Menu Category Base with Logo
+	_artiMenuItem = ["Artillery","Artillery","\a3\ui_f\data\igui\cfg\simpletasks\types\destroy_ca.paa",{[] call artDialog_fnc_artCreateDialog;},_artiCondition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _artiMenuItem] call ace_interact_menu_fnc_addActionToClass;
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						VLS Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+if (getMissionConfigValue "vlsFeature" == "true") then {
+
+	// VLS Terminal
+	_condition = { missionNameSpace getVariable ["vlsStatus",4] < 4 && (((getMissionConfigValue "vlsRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "vlsRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "vlsRolesCMDR") findIf {_x == player getVariable "loadout";} > -1)) };
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["vlsStatus",4]) do {
+			case 1 : {_status = " (Call in Progress)";};
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["VLS Terminal%1",_status]];
+	};
+	
+	_vlsTerminal = ["VLS Terminal","VLS Terminal","A3\ui_f\data\map\mapcontrol\Stack_CA.paa",{[] spawn vlsDialog_fnc_vlsCreateDialog;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _vlsTerminal] call ace_interact_menu_fnc_addActionToClass;
+	
+	// Cruise Missile Menu
+	_condition = {};
+	if (getMissionConfigValue "vlsNeedsLaser" == "true") then {
+		if (getMissionConfigValue "vlsAllowDrones" == "true") then {
+			_condition = {
+							missionNameSpace getVariable ["vlsStatus",4] < 4 &&
+								(( (getMissionConfigValue "vlsEquipment") findIf {currentWeapon player ==  _x } > -1 && isLaserOn player ) || ( [player,"GUNNER"] isEqualTo UAVControl getConnectedUAV player && isLaserOn getConnectedUAV player ) )  && 
+							(((getMissionConfigValue "vlsRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		}
+		else {
+			_condition = {
+							missionNameSpace getVariable ["vlsStatus",4] < 4 &&
+								( (getMissionConfigValue "vlsEquipment") findIf {currentWeapon player ==  _x } > -1 && isLaserOn player ) && 
+							(((getMissionConfigValue "vlsRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		};
+	}
+	else {
+		if (getMissionConfigValue "vlsAllowDrones" == "true") then {
+			_condition = {
+							missionNameSpace getVariable ["vlsStatus",4] < 4 &&
+								(( (getMissionConfigValue "vlsEquipment") findIf {currentWeapon player ==  _x } > -1) || ( [player,"GUNNER"] isEqualTo UAVControl getConnectedUAV player && isLaserOn getConnectedUAV player ) )  && 
+							(((getMissionConfigValue "vlsRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		}
+		else {
+			_condition = {
+							missionNameSpace getVariable ["vlsStatus",4] < 4 &&
+								( (getMissionConfigValue "vlsEquipment") findIf {currentWeapon player ==  _x } > -1) && 
+							(((getMissionConfigValue "vlsRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "vlsRoles") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		};
+	};
+	
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["vlsStatus",4]) do {
+			case 1 : {_status = " (Call in Progress)";};
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Request VLS Strike%1",_status]];
+	};
+	
+	_vls = ["Request VLS Strike","Request VLS Strike","A3\ui_f\data\map\mapcontrol\Stack_CA.paa",{},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _vls] call ace_interact_menu_fnc_addActionToClass;
+
+	
+	// He Missile Entry
+	_condition = {missionNameSpace getVariable ["vlsStatus",4] < 4};
+	
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["HE Missile (%1 left)",missionNameSpace getVariable ["vlsHERounds",0]]];
+	};
+	
+	_vlsHE = ["HE Missile","HE Missile","A3\ui_f\data\map\markers\military\dot_CA.paa",{[0] spawn UAMTvls_fnc_vlsCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","Request VLS Strike"], _vlsHE] call ace_interact_menu_fnc_addActionToClass;
+	
+	
+	// Cluster Missile Entry
+	_condition = {missionNameSpace getVariable ["vlsStatus",4] < 4};
+	
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Cluster Missile (%1 left)",missionNameSpace getVariable ["vlsClusterRounds",0]]];
+	};
+	
+	_vlsCluster = ["Cluster Missile","Cluster Missile","A3\ui_f\data\map\markers\military\dot_CA.paa",{[1] spawn UAMTvls_fnc_vlsCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","Request VLS Strike"], _vlsCluster] call ace_interact_menu_fnc_addActionToClass;
+	
+	//Deactivate current UAV Terminals to connect to the vls Turret
+	player disableUAVConnectability [(missionNamespace getVariable [(getMissionConfigValue "vlsName"), objNull]), true];
+	
+	//Add an Eventhandler that disables the connect ability every time the terminal changes (needed for new picked up terminals)
+	player addEventHandler ["SlotItemChanged", {
+		params ["_unit", "_name", "_slot", "_assigned", "_weapon"];
+			if (_slot == 612) then {
+				player disableUAVConnectability [(missionNamespace getVariable [(getMissionConfigValue "vlsName"), objNull]), true];
+			};
+	}];
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						CAS Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+if (getMissionConfigValue "casFeature" == "true") then {
+	
+	// CAS Terminal
+	_condition = { missionNameSpace getVariable ["casStatus",4] < 4 && (((getMissionConfigValue "casRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == player getVariable "loadout";} > -1)) };
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["casStatus",4]) do {
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["CAS Terminal%1",_status]];
+	};
+	
+	_casTerminal = ["CAS Terminal","CAS Terminal","a3\Modules_F_Curator\Data\portraitCASGunMissile_ca.paa",{[] call casDialog_fnc_casCreateDialog;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _casTerminal] call ace_interact_menu_fnc_addActionToClass;	
+	
+	// CAS Menu  entry
+	_condition = {};
+	if (getMissionConfigValue "casNeedsLaser" == "true") then {
+		if (getMissionConfigValue "casAllowDrones" == "true") then {
+			_condition = {
+							missionNameSpace getVariable ["casStatus",4] < 4 &&
+							(( (getMissionConfigValue "casEquipment") findIf {currentWeapon player ==  _x } > -1 && isLaserOn player ) || ( [player,"GUNNER"] isEqualTo UAVControl getConnectedUAV player && isLaserOn getConnectedUAV player ) )  &&
+							(((getMissionConfigValue "casRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		}
+		else {
+			_condition = {
+							missionNameSpace getVariable ["casStatus",4] < 4 &&
+							( (getMissionConfigValue "casEquipment") findIf {currentWeapon player ==  _x } > -1 && isLaserOn player ) &&
+							(((getMissionConfigValue "casRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		};
+	}
+	else {
+		if (getMissionConfigValue "casAllowDrones" == "true") then {
+			_condition = {
+							missionNameSpace getVariable ["casStatus",4] < 4 &&
+							(( (getMissionConfigValue "casEquipment") findIf {currentWeapon player ==  _x } > -1) || ( [player,"GUNNER"] isEqualTo UAVControl getConnectedUAV player && isLaserOn getConnectedUAV player ) )  &&
+							(((getMissionConfigValue "casRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == player getVariable "loadout";} > -1))
+			};	
+		}
+		else {
+			_condition = {
+							missionNameSpace getVariable ["casStatus",4] < 4 &&
+							( (getMissionConfigValue "casEquipment") findIf {currentWeapon player ==  _x } > -1)  &&
+							(((getMissionConfigValue "casRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "casRolesCMDR") findIf {_x == player getVariable "loadout";} > -1))
+			};		
+		};
+	};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["casStatus",4]) do {
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Request CAS%1",_status]];
+	};
+	
+	_casStrikeMenu = ["CAS Strike","CAS Strike","a3\Modules_F_Curator\Data\portraitCASGunMissile_ca.paa",{},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _casStrikeMenu] call ace_interact_menu_fnc_addActionToClass;
+	
+	
+	// CAS MG runs
+	_condition = {missionNameSpace getVariable ["casStatus",4] < 4};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Machine Gun (%1 left)",(missionNameSpace getVariable ["casMGruns",0])]];
+	};
+	
+	_casMG = ["Machine Gun","Machine Gun","A3\ui_f\data\map\markers\military\dot_CA.paa",{[0] spawn UAMTcas_fnc_casCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","CAS Strike"], _casMG] call ace_interact_menu_fnc_addActionToClass;
+	
+	
+	// CAS missile runs
+	_condition = {missionNameSpace getVariable ["casStatus",4] < 4};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Missiles (%1 left)",(missionNameSpace getVariable ["casMisRuns",0])]];
+	};
+	
+	_casMis = ["Missiles","Missiles","A3\ui_f\data\map\markers\military\dot_CA.paa",{[1] spawn UAMTcas_fnc_casCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","CAS Strike"], _casMis] call ace_interact_menu_fnc_addActionToClass;
+
+	
+	// CAS Missile + MG runs
+	_condition = {missionNameSpace getVariable ["casStatus",4] < 4};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_count = 0;
+		if (missionNameSpace getVariable ["casMGruns",0] > missionNameSpace getVariable ["casMisRuns",0]) then {
+			_count = missionNameSpace getVariable ["casMisRuns",0];
+		}
+		else {
+			_count = missionNameSpace getVariable ["casMGruns",0];
+		};
+		
+		_actionData set [1, format ["MG + Missiles (%1 left)",_count]];
+	};
+	
+	_casMMG = ["MG + Missiles","MG + Missiles","A3\ui_f\data\map\markers\military\dot_CA.paa",{[3] spawn UAMTcas_fnc_casCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","CAS Strike"], _casMMG] call ace_interact_menu_fnc_addActionToClass;	
+
+	
+	// Bomb drops
+	_condition = {missionNameSpace getVariable ["casStatus",4] < 4};
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Bomb (%1 left)",(missionNameSpace getVariable ["casBombRuns",0])]];
+	};
+	
+	_casBomb = ["Bomb","Bomb","A3\ui_f\data\map\markers\military\dot_CA.paa",{[3] spawn UAMTcas_fnc_casCall;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions","CAS Strike"], _casBomb] call ace_interact_menu_fnc_addActionToClass;
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					Helicopter Fire Support Feature
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "hfsFeature" == "true") then {
+
+	// HFS Terminal
+	_condition = { missionNameSpace getVariable ["hfsStatus",4] < 4 && (((getMissionConfigValue "hfsRolesCMDR") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "hfsRolesCMDR") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "hfsRolesCMDR") findIf {_x == player getVariable "loadout";} > -1)) };
+
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["hfsStatus",4]) do {
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Heli Fire Support Terminal%1",_status]];
+	};
+	
+	_hfsTerminal = ["Heli Fire Support Terminal","Heli Fire Support Terminal","a3\ui_f\data\igui\cfg\simpletasks\types\Heli_ca.paa",{[] spawn hfsDialog_fnc_hfsCreateDialog;},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _hfsTerminal] call ace_interact_menu_fnc_addActionToClass;
+	
+	//Heli Fire Support Menu
+	_condition = {
+		 missionNameSpace getVariable ["hfsStatus",4] < 4 && 
+		(((getMissionConfigValue "hfsRoles") findIf {_x == vehicleVarName player;} > -1) || ((getMissionConfigValue "hfsRoles") findIf {_x == groupID group player;} > -1) || ((getMissionConfigValue "hfsRoles") findIf {_x == player getVariable "loadout";} > -1))
+	};
+	
+	_modifierFunc = {
+		params ["_target", "_player", "_params", "_actionData"];
+			
+		// Getting the Status suffix for the Aactionname
+		_status = "";
+		switch (missionNameSpace getVariable ["hfsStatus",4]) do {
+			case 2 : {_status = " (Executing Strike)";};
+			case 3 : {_status = " (Preparing new Strike)";};
+			default {_status = "";};
+		};
+		
+		// Modify the action - index 1 is the display name, 2 is the icon...
+		_actionData set [1, format ["Heli Fire Support%1",_status]];
+	};
+	
+	_hfsMenu = ["Heli Fire Support","Heli Fire Support","a3\ui_f\data\igui\cfg\simpletasks\types\Heli_ca.paa",{},_condition,{},[],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+	[(typeOf player), 1, ["ACE_SelfActions"], _hfsMenu] call ace_interact_menu_fnc_addActionToClass;
+
+	{
+		_hfsIndex = _forEachindex;
+		_hfsClassName = _x select 0;
+		_hfsCount = _x select 1;
+		_hfsCalls = _x select 2;
+
+		_hfsName = getText (configFile >> "CfgVehicles" >> _hfsClassName >> "displayName");
+		
+		_hfsMenuName = (str _hfsCount) + " " + _hfsName;
+
+		_condition = {true};
+
+		_modifierFunc = {
+			params ["_target", "_player", "_params", "_actionData"];
+			_params params ["_hfsIndex","_hfsName"];
+			
+			// Modify the action - index 1 is the display name, 2 is the icon...
+			_actionData set [1, format ["%1 %2 (%3 left)",(((missionNameSpace getVariable ["hfsArray",[]]) select _hfsIndex) select 1),_hfsName,(((missionNameSpace getVariable ["hfsArray",[]]) select _hfsIndex) select 2)]];
+		};
+		
+		_function = {
+			params ["_target", "_player", "_params", "_actionData"];
+			_params params ["_hfsIndex"];
+			
+			[_hfsIndex] spawn UAMThfs_fnc_hfsCall;
+		};
+		
+		_hfsMenuEntry = [_hfsMenuName,_hfsMenuName,"\a3\ui_f\data\igui\cfg\simpletasks\types\Heli_ca.paa",_function,_condition,{},[_hfsIndex,_hfsName],"",0,[false, false, false, false, false],_modifierFunc] call ace_interact_menu_fnc_createAction;
+		[(typeOf player), 1, ["ACE_SelfActions","Heli Fire Support"], _hfsMenuEntry] call ace_interact_menu_fnc_addActionToClass;
+		
+		
+	}forEach (missionNameSpace getVariable ["hfsArray",[]]);
+};
+
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Radio Log
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "radiocodefeature" == "true") then {
+
+	_radioAccess = 0;
+	
+	if (getMissionConfigValue "EverybodyCanListen" == "true") then {
+		_radioAccess = 1;
+	};
+
+	if (getMissionConfigValue "EverybodyCanSend" == "true") then {
+		_radioAccess = 2;
+	};
+	
+	if (((getMissionConfigValue "recipientConfig") findIf {_x == _playerLoadout} > -1) || ((getMissionConfigValue "recipientConfig") findIf {_x == _playerGroupID} > -1)) then {
+		execVM "scripts\UAMTScripts\RadioCode\RadiocodeJoinChannel.sqf";
+		_radioAccess = 2;
+	};	
+	
+	[_radioAccess] execVM "scripts\UAMTScripts\RadioCode\RadiocodeMenu.sqf";
+};
+
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Weapon Proficiency
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+if (getMissionConfigValue "supplyPointFeature" == "true") then {
+
+	player addEventHandler ["WeaponChanged", {
+		params ["_object", "_oldWeapon", "_newWeapon", "_oldMode", "_newMode", "_oldMuzzle", "_newMuzzle", "_turretIndex"];
+		
+		_profWeapons = player getVariable ["profWeapons",[]];
+		
+		if (_newWeapon in _profWeapons) then {
+			ace_common_SwayFactor = getMissionConfigValue "wPSwayPro";
+			player setUnitRecoilCoefficient (getMissionConfigValue "wPRecoilPro");
+		}
+		else {	
+			ace_common_SwayFactor = getMissionConfigValue "wPSwayDef";
+			player setUnitRecoilCoefficient (getMissionConfigValue "wPRecoilDef");
+		};		
+	}];
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					Random IED Features
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+if (getMissionConfigValue "rViFFeature" == "true") then {
+
+	{
+		_x addEventHandler ["ContainerOpened", {			
+			params ["_container", "_unit"];
+			if (_container in (missionNameSpace getVariable ["trappedVehicles",[]])) then {
+				[_container,getmissionConfigValue "rVifBombType"]remoteExec ["UAMT_fnc_vehicleIEDBlowUp",2];
+			};
+		}];
+	} forEach (missionNameSpace getVariable ["trappedVehicles",[]]);
+};
+
+if (getMissionConfigValue "riFFeature" == "true") then {
+	player addEventHandler ["InventoryOpened", {
+		params ["_unit", "_container"];
+
+		if (_container in (missionNameSpace getVariable ["rifUnits",[]])) then {
+			[_container] remoteExec ["UAMT_fnc_iedBlowUp",2];
+		};
+	}];
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					Player Performance
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+_camo = 1;
+_audib = 1;
+_load = 1;
+_damage = 1;
+_perf = 1;
+
+_unitLevel = getMissionConfigValue "unitLevel";
+
+switch (_unitLevel) do {
+	case "default" : {
+		_camo = 1;
+		_audib = 1;
+		_damage = 1;
+		_perf = 1;
+	};
+	case "improved" : {
+		_camo = 2;
+		_audib = 2;
+		_damage = 1;
+		_perf = 1.5;
+	};
+	case "special" : {
+		_camo = 2.5;
+		_audib = 2.5;
+		_damage = 1.3;
+		_perf = 1.8;
+	};
+	case "operator" : {
+		_camo = 3;
+		_audib = 3;
+		_damage = 1.5;
+		_perf = 2;
+	};
+	case "custom" : {
+		_camo = getMissionConfigValue "camouflageCnfg";
+		_audib = getMissionConfigValue "audibCnfg";
+		_damage = getMissionConfigValue "aceDmgCnfg";
+		_perf = getMissionConfigValue "acePerfCnfg";
+	};
+};
+
+player setUnitTrait ["camouflageCoef",_camo,true];
+player setUnitTrait ["audibleCoef ",_audib,true];
+
+player setVariable ["ace_medical_damageThreshold", _damage, true];
+player setVariable ["ace_advanced_fatigue_performanceFactor", _perf, true];
+
 
 //------------------------------------------------------------------
 //------------------------------------------------------------------
@@ -73,342 +853,142 @@ call compile preprocessFileLineNumbers format ["loadouts\%1\gruppenLoadouts.sqf"
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 
-/*
-// Recolor Post-Processing - Night
-PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500];
-PPeffect_colorC ppEffectAdjust [1.04,0.9,-0.00279611,[0.147043,0,0.0476897,-0.34],[1,1,0.94,1.15],[1.39,0.95,-1.34,0]];
-PPeffect_colorC ppEffectEnable true;
-PPeffect_colorC ppEffectCommit 0;
-*/
-
-/*
-// Recolor Post-Processing - Desert/Winter
-"colorCorrections" ppEffectAdjust 	[1,1,-0.01,[0.0, 0.0, 0.0, 0.0],[1, 0.8, 0.6, 0.6],[0.199, 0.587, 0.114, 0.0]]; 
-"colorCorrections" ppEffectEnable true; 
-"colorCorrections" ppEffectCommit 0; 
-"filmGrain" ppEffectAdjust 	[0.04,1,1,0.1,1,false];      
-"filmGrain" ppEffectEnable true;    
-*/
-
-/*
-// Recolor Post-Processing - Winter Day
-"colorCorrections" ppEffectAdjust  [1.1,1.2,-0.01,[0.0, 0.0, 0.0, 0.0],[0.8, 0.8, 1, 0.6],[0.199, 0.587, 0, 0.0]];  
-"colorCorrections" ppEffectEnable true;  
-"colorCorrections" ppEffectCommit 0; 
-"filmGrain" ppEffectAdjust 	[0.04,1,1,0.1,1,false];      
-"filmGrain" ppEffectEnable true;
-"filmGrain" ppEffectCommit 0;  
-*/
-
-/*
-// Recolor Post-Processing - brownish, bright african
-PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500];
-PPeffect_colorC ppEffectAdjust [1,1,-0.00279611,[0.399248,0.452746,0.307538,0.1042],[1.36009,1,0.320698,0.95],[2.50966,0.263398,3.22694,0]];
-PPeffect_colorC ppEffectEnable true;
-PPeffect_colorC ppEffectCommit 0;
-*/
-
-/*
-// Recolor Post-Processing - Jungle Rainy
-PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500]; 
-PPeffect_colorC ppEffectAdjust [1,1,0,[0,1,0.3,0.04],[1,1,1,1],[0.3,0.587,0.114,0]]; 
-PPeffect_colorC ppEffectEnable true; 
-PPeffect_colorC ppEffectCommit 0;
-"filmGrain" ppEffectAdjust  [0.04,1,1,0.1,1,false];
-"filmGrain" ppEffectEnable true;
-*/
-
-/*
-// Recolor Post-Processing - Jungle
-PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500]; 
-PPeffect_colorC ppEffectAdjust [1,1,0,[0,1,0.1,0.04],[1,1,1,1],[0.3,0.587,0.114,0]]; 
-PPeffect_colorC ppEffectEnable true; 
-PPeffect_colorC ppEffectCommit 0;
-*/
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						Effects
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-/*
-	[object,interval,brightness,newspapers] call BIS_fnc_sandstorm
-	position: Object - sandstorm center (should be player)
-	interval (Optional): Number - particle refresh time (default is 0.07)
-	brightness (Optional): Number - brightness coeficient (default is 1)
-	newspapers (Optional): Boolean - true if flying newspapers will be present (default is true)
-*/
-
-//[player, 0.9, 0.5, true] call BIS_fnc_sandstorm;
-
-//FoggyBreath
-//_units = if (!isMultiplayer) then {switchableUnits} else {playableUnits};
-//{[_x, 0.03] execVM "scripts\core\foggy_breath.sqf"} forEach _units;
-
-//Ground Fog
-//null = [] execVM "scripts\core\GroundFog.sqf";
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//					Kisten Dragable mit ACE
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-/*
-check the weight:	[cursorTarget] call ace_dragging_fnc_getweight;
-max weight is:		ACE_maxWeightCarry = 800;
-					ACE_maxWeightDrag = 1000;
-*/
-
-/*
-if isClass (configFile >> "CfgPatches" >> "ace_main") then {
-    [crate1, true, [0, 1, 1], 0] call ace_dragging_fnc_setCarryable;
-    [crate1, true, [0, 2, 0], 90] call ace_dragging_fnc_setDraggable;
-};
-*/
-
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//					TFAR Longrange in Fahrzeugen
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-// Wird benötigt um West TFAR Longrange Funk in Fahrzeugen anderer Fraktionen zu integrieren
-
-/*
-if (isClass(configFile >> "cfgPatches" >> "task_force_radio")) then {
-    car1 setVariable ["tf_side", west];
-    car1 setVariable ["tf_hasRadio", true];
-    car1 setVariable ["TF_RadioType", "tfar_rt1523g"];
-};
-*/
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						German Rangers GUI
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-_playerGrp = group player;
-
-//Bestimmt wann das GR Menü angezeigt wird. Im Umkreis der Basis (Radius 50m)und vor Missionsstart.
-_condition = {player distance GR_baseFlag < 100 || missionstarted == false};
-
-// Creating a Sub Menu Category GR Base with Logo
-_base_menu = ["GR Base","GR Base","images\GermanRangersLogo.paa",{  },_condition] call ace_interact_menu_fnc_createAction;
-[(typeOf player), 1, ["ACE_SelfActions"], _base_menu] call ace_interact_menu_fnc_addActionToClass;
-
-//Add Waffenkammer to ACE Menu GR Base
-if (getMissionConfigValue "allowWaffenkammer" == "true") then { 
-	_waffenkammer = ["Waffenkammer","Waffenkammer","a3\ui_f\data\gui\rsc\rscdisplayarsenal\spacegarage_ca.paa",{ execVM waffenkammerpfad; },_condition] call ace_interact_menu_fnc_createAction;
-	[(typeOf player), 1, ["ACE_SelfActions","GR Base"], _waffenkammer] call ace_interact_menu_fnc_addActionToClass;
-};
-
-// Add Teleport to ACE Menu GR Base
-_teleport_action = ["Teleporter","Teleporter","a3\ui_f\data\igui\cfg\simpletasks\types\move_ca.paa",{ [player] spawn GR_fnc_createTeleportDialog; },_condition] call ace_interact_menu_fnc_createAction;
-[player, 1, ["ACE_SelfActions","GR Base"], _teleport_action] call ace_interact_menu_fnc_addActionToObject;
-
-// Add Loadout to ACE Menu GR Base
-if (getMissionConfigValue "allowLoadouts" == "true") then {
-	// neue function für Zug 3.0	
-	_loadout_action = ["Loadouts","Loadouts","a3\ui_f\data\gui\rsc\rscdisplayarsenal\handgun_ca.paa",{ [player] spawn GR_fnc_createLoadoutDialog; },_condition] call ace_interact_menu_fnc_createAction;
-	[player, 1, ["ACE_SelfActions","GR Base"], _loadout_action] call ace_interact_menu_fnc_addActionToObject;	
-};
-
-// Add Würfeln Category to ACE Menu GR Equipment
-_diceMain = ["GR_diceMain","Würfeln","a3\3den\data\displays\display3den\toolbar\widget_local_ca.paa",{  },{true}] call ace_interact_menu_fnc_createAction;
-[player, 1, ["ACE_SelfActions", "GerRng_equip"], _diceMain] call ace_interact_menu_fnc_addActionToObject; 
-
-_actionDice20 = ["GR_rollDice20","(W20)","",{ [player,"(W20)", floor (random 20)+1,8] spawn SGN_fnc_rollDice; },{true}] call ace_interact_menu_fnc_createAction;
-[player, 1, ["ACE_SelfActions","GerRng_equip","GR_diceMain"], _actionDice20] call ace_interact_menu_fnc_addActionToObject; 
-
-_actionDice6 = ["GR_rollDice6","(W6)","",{ [player,"(W6)", floor (random 6)+1,8] spawn SGN_fnc_rollDice; },{true}] call ace_interact_menu_fnc_createAction;
-[player, 1, ["ACE_SelfActions", "GerRng_equip","GR_diceMain"], _actionDice6] call ace_interact_menu_fnc_addActionToObject;
-
-// Debug Funktionen - Nur im Editor / SP verfügbar
-if (! isMultiplayer) then {		
-	// Full ACE Arsenal Action
-	_action = ["open","<t color='#52fc03'>Full ACE Arsenal</t>",["","#52fc03"],{ [player] spawn SGN_fnc_createArsenalACE; },{true}] call ace_interact_menu_fnc_createAction;
-	[player, 1, ["ACE_SelfActions"], _action] call ace_interact_menu_fnc_addActionToObject; 	
-	
-	// Master Packliste Action
-	_actionPckList = ["openPackliste","<t color='#fcba03'>Master Packliste</t>",["","#fcba03"],{ [player] spawn SGN_fnc_createPacklisteACE; },{true}] call ace_interact_menu_fnc_createAction;
-	[player, 1, ["ACE_SelfActions"], _actionPckList] call ace_interact_menu_fnc_addActionToObject; 	
-	
-	// Export Loadout Action
-	_export = ["export", "<t color='#eb34d5'>Export LoadOut To Clipboard</t>", ["","#eb34d5"], {[player] spawn SGN_fnc_exportLoadOutArray;}, {true}] call ace_interact_menu_fnc_createAction;
-	[player, 1, ["ACE_SelfActions"], _export] call ace_interact_menu_fnc_addActionToObject; 
-};
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						Zeus Mission Control
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-// Creating a Sub Menu Category GR Base with Logo
-_mission_control = ["Mission Control","Mission Control","images\GermanRangersLogo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
-[["ACE_ZeusActions"], _mission_control] call ace_interact_menu_fnc_addActionToZeus;
-
-_start_mission = ["Missionsstart","Missionsstart","",{ execVM "scripts\core\MCC_chapter_startMissionIntro.sqf"; },{missionstarted == false}] call ace_interact_menu_fnc_createAction;
-[["ACE_ZeusActions","Mission Control"], _start_mission] call ace_interact_menu_fnc_addActionToZeus;
-
-_mission_succesful = ["Ende: Mission Erfüllt","Ende: Mission Erfüllt","",{ ["End1"] execVM "scripts\core\MCC_chapter_startMissionOutro.sqf"; },{missionstarted}] call ace_interact_menu_fnc_createAction;
-[["ACE_ZeusActions","Mission Control"], _mission_succesful] call ace_interact_menu_fnc_addActionToZeus;
-
-_to_be_continued = ["Ende: TO BE CONTINUED","Ende: TO BE CONTINUED","",{ ["End2"] execVM "scripts\core\MCC_chapter_startMissionOutro.sqf"; },{missionstarted}] call ace_interact_menu_fnc_createAction;
-[["ACE_ZeusActions","Mission Control"], _to_be_continued] call ace_interact_menu_fnc_addActionToZeus;
-
-_mission_failed = ["Ende: Mission Failed","Ende: Mission Failed","",{ ["End3"] execVM "scripts\core\MCC_chapter_startMissionOutro.sqf"; },{missionstarted}] call ace_interact_menu_fnc_createAction;
-[["ACE_ZeusActions","Mission Control"], _mission_failed] call ace_interact_menu_fnc_addActionToZeus;
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						Admin Control Menu
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-if (_playerGrp == grplima || _playerGrp == grpkilo || _playerGrp == grpfox || _playerGrp == grpvictor || _playerGrp == grphotel) then {
-	// Creating the Admin Control Menu Category GR Base with Logo
-	_adminmenu = ["GR Admin Menu","GR Admin Menu","images\GermanRangersLogo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
-	[(typeOf player), 1, ["ACE_SelfActions"], _adminmenu] call ace_interact_menu_fnc_addActionToClass;
-
-	_avdheal = ["AvD Heal","AvD Heal","a3\ui_f\data\igui\cfg\simpletasks\types\heal_ca.paa",{[player, cursorObject] call ace_medical_treatment_fnc_fullHeal},{true}] call ace_interact_menu_fnc_createAction;
-	[(typeOf player), 1, ["ACE_SelfActions","GR Admin Menu"], _avdheal] call ace_interact_menu_fnc_addActionToClass;
-
-	[(typeOf player), 1, ["ACE_SelfActions","GR Admin Menu"], _start_mission] call ace_interact_menu_fnc_addActionToClass;
-
-	[(typeOf player), 1, ["ACE_SelfActions","GR Admin Menu"], _mission_succesful] call ace_interact_menu_fnc_addActionToClass;
-	
-	[(typeOf player), 1, ["ACE_SelfActions","GR Admin Menu"], _to_be_continued] call ace_interact_menu_fnc_addActionToClass;
-	
-	[(typeOf player), 1, ["ACE_SelfActions","GR Admin Menu"], _mission_failed] call ace_interact_menu_fnc_addActionToClass;
-	
-	_checkHCs = ["Check HCs","Check HCs","a3\ui_f\data\igui\cfg\simpletasks\types\intel_ca.paa",{[[player], SGN_fnc_infoHintHC] remoteExec ["spawn", 2];},{true}] call ace_interact_menu_fnc_createAction;
-	[player, 1, ["ACE_SelfActions","GR Admin Menu"], _checkHCs] call ace_interact_menu_fnc_addActionToObject;
-};
-
-if (_playerGrp == grpmike) then {
-	// Creating the Admin Control Menu Category GR Base with Logo
-	_avdmenu = ["GR AvD Menu","GR Avd Menu","images\GermanRangersLogo.paa",{}, {true}] call ace_interact_menu_fnc_createAction;
-	[(typeOf player), 1, ["ACE_SelfActions"], _avdmenu] call ace_interact_menu_fnc_addActionToClass;
-
-	_avdheal = ["AvD Heal","AvD Heal","a3\ui_f\data\igui\cfg\simpletasks\types\heal_ca.paa",{[player, cursorObject] call ace_medical_treatment_fnc_fullHeal},{true}] call ace_interact_menu_fnc_createAction;
-	[(typeOf player), 1, ["ACE_SelfActions","GR AvD Menu"], _avdheal] call ace_interact_menu_fnc_addActionToClass;
-};
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						LIMA Supply Point
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-//Deprecated moved to IGC_CF
-
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-//
-//						LIMA Paletten Supply Point
-//
-//------------------------------------------------------------------
-//------------------------------------------------------------------
-
-if (getMissionConfigValue "limaSupplyPoints" == "true") then {
-	if (_playerGrp == grplima || _playerGrp == grpkilo || _playerGrp == grphotel || _playerGrp == grpmike) then {
-		
-		// Icon für Paletten-deploy
-		_icon = "a3\ui_f\data\igui\cfg\cursors\iconboardin_ca.paa";
-		_iconPl = "a3\ui_f\data\igui\cfg\simpletasks\types\container_ca.paa";
-
-		// Lima Palett Point Static
-		{
-			// Parent Action für Luftfracht Paletten  - Leer
-			_palettenLF = ["Luftfracht Paletten - Leer","Luftfracht Paletten  - Leer",_iconPl,{ },{true}] call ace_interact_menu_fnc_createAction;
-			[_x, 0, ["ACE_MainActions"], _palettenLF] call ace_interact_menu_fnc_addActionToObject;
-				//------------------------------------------------------------------
-				_plmaster = ["plmaster","Typ 1 - Master",_icon,{[["plmaster",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Leer"], _plmaster] call ace_interact_menu_fnc_addActionToObject;
-
-				_plammosmall = ["plammosmall","Typ 2 - Klein",_icon,{[["plammosmall",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Leer"], _plammosmall] call ace_interact_menu_fnc_addActionToObject;
-
-				_plcasetan = ["plcasetan","Typ 3 - Hardcase",_icon,{[["plcasetan",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Leer"], _plcasetan] call ace_interact_menu_fnc_addActionToObject;
-
-				_plcasemed = ["plcasetan","Typ 4 - Hardcase San",_icon,{[["plcasemed",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Leer"], _plcasemed] call ace_interact_menu_fnc_addActionToObject;
-				//------------------------------------------------------------------
-			// Parent Action für Luftfracht Paletten  - Logistik
-			_palettenLF = ["Luftfracht Paletten - Logistik","Luftfracht Paletten  - Logistik",_iconPl,{ },{true}] call ace_interact_menu_fnc_createAction;
-			[_x, 0, ["ACE_MainActions"], _palettenLF] call ace_interact_menu_fnc_addActionToObject;
-				//------------------------------------------------------------------
-				_plfmun = ["plfmun","Typ 5 - Fahrzeugmunition",_icon,{[["plfmun",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Logistik"], _plfmun] call ace_interact_menu_fnc_addActionToObject;
-
-				_plfuels = ["plfuels","Typ 6 - Treibstoff Klein",_icon,{[["plfuels",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Logistik"], _plfuels] call ace_interact_menu_fnc_addActionToObject;
-
-				_plfuell = ["plfuell","Typ 7 - Treibstoff Gross",_icon,{[["plfuell",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Logistik"], _plfuell] call ace_interact_menu_fnc_addActionToObject;
-
-				_plrepair = ["plcasetan","Typ 8 - Instandsetzung",_icon,{[["plrepair",_this#0], limapfad + "limaPalettPoints.sqf"] remoteExec ["execVM"];},{true}] call ace_interact_menu_fnc_createAction;
-				[_x, 0, ["ACE_MainActions", "Luftfracht Paletten - Logistik"], _plrepair] call ace_interact_menu_fnc_addActionToObject;
-				//------------------------------------------------------------------
-		} forEach [limapalettpointstatic];
+switch (getMissionConfigValue "colorgrading") do
+{
+	case "Night": {
+		// Recolor Post-Processing - Night
+		PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500];
+		PPeffect_colorC ppEffectAdjust [1.04,0.9,-0.00279611,[0.147043,0,0.0476897,-0.34],[1,1,0.94,1.15],[1.39,0.95,-1.34,0]];
+		PPeffect_colorC ppEffectEnable true;
+		PPeffect_colorC ppEffectCommit 0;		
+	};
+	case "Desert/Winter": {
+		// Recolor Post-Processing - Desert/Winter
+		"colorCorrections" ppEffectAdjust 	[1,1,-0.01,[0.0, 0.0, 0.0, 0.0],[1, 0.8, 0.6, 0.6],[0.199, 0.587, 0.114, 0.0]]; 
+		"colorCorrections" ppEffectEnable true; 
+		"colorCorrections" ppEffectCommit 0; 
+		"filmGrain" ppEffectAdjust 	[0.04,1,1,0.1,1,false];      
+		"filmGrain" ppEffectEnable true; 		
+	};
+	case "Winter Day": {
+		// Recolor Post-Processing - Winter Day
+		"colorCorrections" ppEffectAdjust  [1.1,1.2,-0.01,[0.0, 0.0, 0.0, 0.0],[0.8, 0.8, 1, 0.6],[0.199, 0.587, 0, 0.0]];  
+		"colorCorrections" ppEffectEnable true;  
+		"colorCorrections" ppEffectCommit 0; 
+		"filmGrain" ppEffectAdjust 	[0.04,1,1,0.1,1,false];      
+		"filmGrain" ppEffectEnable true;
+		"filmGrain" ppEffectCommit 0; 		
+	};
+	case "African": {
+		// Recolor Post-Processing - brownish, bright african
+		PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500];
+		PPeffect_colorC ppEffectAdjust [1,1,-0.00279611,[0.399248,0.452746,0.307538,0.1042],[1.36009,1,0.320698,0.95],[2.50966,0.263398,3.22694,0]];
+		PPeffect_colorC ppEffectEnable true;
+		PPeffect_colorC ppEffectCommit 0;		
+	};
+	case "Jungle Rainy": {
+		// Recolor Post-Processing - Jungle Rainy
+		PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500]; 
+		PPeffect_colorC ppEffectAdjust [1,1,0,[0,1,0.3,0.04],[1,1,1,1],[0.3,0.587,0.114,0]]; 
+		PPeffect_colorC ppEffectEnable true; 
+		PPeffect_colorC ppEffectCommit 0;
+		"filmGrain" ppEffectAdjust  [0.04,1,1,0.1,1,false];
+		"filmGrain" ppEffectEnable true;		
+	};
+	case "Jungle": {
+		// Recolor Post-Processing - Jungle
+		PPeffect_colorC = ppEffectCreate ["ColorCorrections",1500]; 
+		PPeffect_colorC ppEffectAdjust [1,1,0,[0,1,0.1,0.04],[1,1,1,1],[0.3,0.587,0.114,0]]; 
+		PPeffect_colorC ppEffectEnable true; 
+		PPeffect_colorC ppEffectCommit 0;		
 	};
 };
 
+
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //
-//						
+//							Foggy Breath
 //
+// 		Creates little clouds in front of every players face
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 
-//Wenn das Missionsintro gestartet wurde, werden alle Spieler die reconnecten oder später dazu kommen in die Basis teleportiert.
-if (getMissionConfigValue "missionstartedfeat" == "true") then {
-	if missionstarted then {
-		player setPos getPos GR_baseFlag;
-	};
+if (getMissionConfigValue "foggybreath" == "true") then {
+	_units = if (!isMultiplayer) then {switchableUnits} else {playableUnits};
+	{[_x, 0.03] execVM "scripts\UAMTScripts\AmbienceScripts\foggy_breath.sqf"} forEach _units;
 };
 
-sleep 1;
-
-titleText ["Missionsvorbereitung", "BLACK IN" ];
-
-//Blurry Back to Visuals
-"dynamicBlur" ppEffectEnable true;
-"dynamicBlur" ppEffectAdjust [6];
-"dynamicBlur" ppEffectCommit 0;
-"dynamicBlur" ppEffectAdjust [0.0];
-"dynamicBlur" ppEffectCommit 3;
 
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 //
-//						Mod Check
+//							Groundfog
 //
-// 			Checks Loaded Mods and logs Non Whitelisted
+// Creates clouds of fog slightly above the ground around the 
+// Player
 //------------------------------------------------------------------
 //------------------------------------------------------------------
 
-_modCheck = ["GR_modCheckParam", 1] call BIS_fnc_getParamValue;
-if (_modCheck != 0) then {
-	[] execVM "scripts\core\modcheck.sqf";
+if (getMissionConfigValue "groundfog" == "true") then {
+	_intensity = 0.001;
+	_intensityConfig = getMissionConfigValue "groundfogstrength";
+	switch (_intensityConfig) do {
+		case 1: {_intensity = 0.001};
+		case 2: {_intensity = 0.003};
+		case 3: {_intensity = 0.005};
+		case 4: {_intensity = 0.01};
+		case 5: {_intensity = 0.04};
+	};
+	null = [_intensity] execVM "scripts\UAMTScripts\AmbienceScripts\GroundFog.sqf";
+};
+
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//						Sandstorm Effect
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+
+if (getMissionConfigValue "sandstorm" == "true") then {
+	[player, 0.9, 0.5, true] call BIS_fnc_sandstorm;
+};
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+//
+//					Mission Specific Items
+//
+// In this follow Up Script you can add Mission Specific Configs
+// This makes Updating the UAMT to a new Version easier.
+//
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+execVM "MissionSpecifics\MSInitPlayerLocal.sqf";
+
+
+//------------------------------------------------------------------
+//						Welcome Messages
+//------------------------------------------------------------------
+if (!_devMode) then {
+	titleText ["Preparing Mission...", "BLACK IN", 0.2];
+
+
+	//Blurry Back to Visuals
+	"dynamicBlur" ppEffectEnable true;
+	"dynamicBlur" ppEffectAdjust [6];
+	"dynamicBlur" ppEffectCommit 0;
+	"dynamicBlur" ppEffectAdjust [0.0];
+	"dynamicBlur" ppEffectCommit 3;
+
+	//You can of course take this out but we would appreciate if you give us a little credit for all the work
+	["images\Logo.paa",[0.16,0.1,0.6,0.8],10,5,2] spawn BIS_fnc_textTiles;
+
+	sleep 10;
+
+	if (getMissionConfigValue "welcomeMessage" == "true") then {
+		[] call UAMT_fnc_welcomeMessage;
+	};
 };
